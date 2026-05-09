@@ -245,3 +245,146 @@ joblib.dump(ref_map,          'referral_source_map.pkl')
 
 print('\n✅ Saved: thyroidmodel.pkl, labelencoder.pkl, referral_source_map.pkl')
 print('Now run: streamlit run myapp.py')
+
+# ── ALL PLOTS ─────────────────────────────────────────────────────────────────
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+# ── Fig 1: Class Distribution ─────────────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(7, 4))
+classes = ['Normal', 'Hypothyroid', 'Hyperthyroid']
+counts  = [sum(y == i) for i, c in enumerate(le.classes_) for cc in [c] if cc in classes or True]
+counts  = dict(zip(le.classes_, [sum(y == i) for i in range(len(le.classes_))]))
+colors  = ['#185FA5', '#0F6E56', '#D85A30']
+ax.bar(counts.keys(), counts.values(), color=colors, zorder=3)
+for i, (k, v) in enumerate(counts.items()):
+    ax.text(i, v + 30, str(v), ha='center', fontsize=11)
+ax.set_title('Fig 1. Class Distribution', fontsize=12)
+ax.set_ylabel('Count')
+ax.yaxis.grid(True, linestyle='--', alpha=0.5, zorder=0)
+ax.set_axisbelow(True)
+plt.tight_layout()
+plt.savefig('fig1_class_distribution.png', dpi=150, bbox_inches='tight')
+plt.show()
+print('✅ fig1_class_distribution.png saved')
+
+# ── Fig 2: Missing Values ─────────────────────────────────────────────────────
+hormone_cols = ['TSH', 'T3', 'TT4', 'T4U', 'FTI']
+missing = {col: df[col].isnull().sum() for col in hormone_cols if col in df.columns}
+fig, ax = plt.subplots(figsize=(7, 4))
+ax.bar(missing.keys(), missing.values(), color='#185FA5', zorder=3)
+for i, (k, v) in enumerate(missing.items()):
+    ax.text(i, v + 5, str(v), ha='center', fontsize=11)
+ax.set_title('Fig 2. Missing Value Counts per Hormone Column (before imputation)', fontsize=11)
+ax.set_ylabel('Missing Count')
+ax.yaxis.grid(True, linestyle='--', alpha=0.5, zorder=0)
+ax.set_axisbelow(True)
+plt.tight_layout()
+plt.savefig('fig2_missing_values.png', dpi=150, bbox_inches='tight')
+plt.show()
+print('✅ fig2_missing_values.png saved')
+
+# ── Fig 3: XGBoost Feature Importance ─────────────────────────────────────────
+xgb_model   = all_results['XGBoost']['pipeline'].named_steps['classifier']
+feat_names  = (numerical_cols +
+               all_results['XGBoost']['pipeline']
+               .named_steps['preprocessor']
+               .transformers_[1][2])
+importances = xgb_model.feature_importances_
+top_idx     = np.argsort(importances)[-15:]
+
+fig, ax = plt.subplots(figsize=(8, 6))
+colors_fi = ['#D85A30' if feat_names[i] in ['TSH','T3','TT4','T4U','FTI','age']
+             else '#185FA5' for i in top_idx]
+ax.barh([feat_names[i] for i in top_idx],
+        [importances[i] for i in top_idx],
+        color=colors_fi, zorder=3)
+ax.set_title('Fig 3. Top 15 XGBoost Feature Importances\n(red = hormone levels)', fontsize=11)
+ax.set_xlabel('F-score (importance)')
+ax.xaxis.grid(True, linestyle='--', alpha=0.5, zorder=0)
+ax.set_axisbelow(True)
+plt.tight_layout()
+plt.savefig('fig3_feature_importance.png', dpi=150, bbox_inches='tight')
+plt.show()
+print('✅ fig3_feature_importance.png saved')
+
+# ── Fig 4: Train CV F1 vs Test F1 ────────────────────────────────────────────
+model_names = list(all_results.keys())
+cv_scores   = [all_results[m]['cv_mean'] for m in model_names]
+test_scores = [all_results[m]['test_f1'] for m in model_names]
+short_names = ['SVM\n(RBF)', 'XGBoost', 'Stacking\n(XGB+RF+SVM→LR)', 'Bagging\n(100 DT)']
+x     = np.arange(len(model_names))
+width = 0.35
+
+fig, ax = plt.subplots(figsize=(10, 6))
+bars1 = ax.bar(x - width/2, cv_scores,   width, label='Train CV F1', color='#185FA5', zorder=3)
+bars2 = ax.bar(x + width/2, test_scores, width, label='Test F1',     color='#0F6E56', zorder=3)
+for bar in bars1:
+    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.003,
+            f'{bar.get_height():.3f}', ha='center', va='bottom', fontsize=10)
+for bar in bars2:
+    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.003,
+            f'{bar.get_height():.3f}', ha='center', va='bottom', fontsize=10)
+ax.set_ylabel('Macro F1 Score', fontsize=12)
+ax.set_title('Fig 4. Train CV F1 vs Test F1 — All Models\n(Similar heights = good generalisation)', fontsize=11)
+ax.set_xticks(x)
+ax.set_xticklabels(short_names, fontsize=11)
+ax.set_ylim(0.60, 0.95)
+ax.legend(fontsize=11)
+ax.yaxis.grid(True, linestyle='--', alpha=0.6, zorder=0)
+ax.set_axisbelow(True)
+plt.tight_layout()
+plt.savefig('fig4_model_comparison.png', dpi=150, bbox_inches='tight')
+plt.show()
+print('✅ fig4_model_comparison.png saved')
+
+# ── Fig 5: Confusion Matrices ─────────────────────────────────────────────────
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+axes = axes.flatten()
+plot_names = ['SVM (RBF Kernel)', 'XGBoost',
+              'Stacking (XGB + RF + SVM → LR)', 'Bagging (100 Decision Trees)']
+short_titles = ['SVM (RBF)', 'XGBoost', 'Stacking (XGB+RF+SVM→LR)', 'Bagging (100 DT)']
+
+for i, name in enumerate(plot_names):
+    cm  = confusion_matrix(y_test, all_results[name]['y_pred'])
+    gap = all_results[name]['gap']
+    tf1 = all_results[name]['test_f1']
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm,
+                                  display_labels=le.classes_)
+    disp.plot(ax=axes[i], colorbar=False, cmap='Blues')
+    axes[i].set_title(
+        f'{short_titles[i]}\nTest Macro F1 = {tf1:.3f} | Gap = {gap:.3f} {all_results[name]["status"]}',
+        fontsize=10)
+
+fig.suptitle('Fig 5. Confusion Matrices — All Models on Test Set\n(Diagonal = correctly classified | Off-diagonal = misclassified)',
+             fontsize=12, y=1.01)
+plt.tight_layout()
+plt.savefig('fig5_confusion_matrices.png', dpi=150, bbox_inches='tight')
+plt.show()
+print('✅ fig5_confusion_matrices.png saved')
+
+# ── EDA: Hormone Distribution by Class ───────────────────────────────────────
+fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+axes = axes.flatten()
+eda_df = df.copy()
+eda_df['diagnosis'] = le.inverse_transform(y)
+colors_eda = {'Normal': '#185FA5', 'Hypothyroid': '#0F6E56', 'Hyperthyroid': '#D85A30'}
+
+for i, col in enumerate(hormone_cols):
+    for cls, clr in colors_eda.items():
+        subset = eda_df[eda_df['diagnosis'] == cls][col].dropna()
+        axes[i].hist(subset, bins=40, alpha=0.6, label=cls, color=clr)
+    axes[i].set_title(f'{col} distribution by class', fontsize=11)
+    axes[i].set_xlabel(col)
+    axes[i].set_ylabel('Count')
+    axes[i].legend(fontsize=9)
+
+axes[-1].axis('off')
+fig.suptitle('EDA: Hormone Level Distributions by Thyroid Class', fontsize=13)
+plt.tight_layout()
+plt.savefig('eda_hormone_distributions.png', dpi=150, bbox_inches='tight')
+plt.show()
+print('✅ eda_hormone_distributions.png saved')
+print('\n✅ ALL PLOTS SAVED!')
